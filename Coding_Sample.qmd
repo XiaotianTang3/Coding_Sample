@@ -1,0 +1,281 @@
+---
+title: "Top Location by Alert Type and Hour Dashboard"
+author: "Xiaotian Tang"
+date: today
+date-format: long
+format: 
+    html:
+        echo: true
+---
+
+The data for this coding sample can be found [here](https://github.com/uchicago-harris-dap/student30538/raw/refs/heads/main/problem_sets/ps6/waze_data.zip). The data dictionary for this dataset can be found [here](https://docs.google.com/spreadsheets/d/1DcUZlaM-H2Dqj2pjJ2o4NeJo70Ej9RKLXaezw6Fy6uQ/edit?gid=1518678547#gid=1518678547).
+
+```{python}
+# required package
+import pandas as pd
+import altair as alt 
+from datetime import date
+import numpy as np
+import zipfile
+alt.data_transformers.disable_max_rows() 
+import json
+import requests
+```
+
+# Data Download and Cleaning
+
+### Using the zipfile package, unzip the waze_data.zip file. Load the waze_data.csv file into a pandas DataFrame.
+
+```{python}
+# $ cd your/working/direcory
+
+# Extract zip
+zip_path = 'waze_data.zip'
+ext_path = 'waze_data'
+
+with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+    zip_ref.extractall(ext_path)
+
+# load the waze_data.csv file into a dataframe waze
+waze_path = "waze_data/waze_data.csv"
+waze = pd.read_csv(waze_path)
+print(waze.head(5))
+
+```
+
+### print the unique values for the columns type and subtype.
+
+```{python}
+# print the unique values
+unique_types = waze['type'].unique()
+unique_subtypes = waze['subtype'].unique()
+print(f'The unique types:{unique_types}')
+print(f'The unique subtypes:{unique_subtypes}')
+```
+
+We discover that even though they are quite informative, some of them are not well structured, and some even have enough information to consider a sub-subtype. This is our motivation to clean this data.
+
+First, we write out a bulleted listed with the values at each layer given this hiararchy idea.
+
+
+-   Accident
+    -   Major
+    -   Minor
+-   Hazard
+    -   On Road
+        -   Car Stopped
+        -   Construction
+        -   Emergency Vehicle
+        -   Ice
+        -   Object
+        -   Pot Hole
+        -   Traffic Light Fault
+        -   Lane Closed
+        -   Road Kill
+    -   On Shoulder
+        -   Car Stopped
+        -   Animals
+        -   Missing Sign
+    -   Weather
+        -   Flood
+        -   Fog
+        -   Heavy Snow
+        -   Hail
+-   Jam
+    -   Heacy Traffic
+    -   Moderate Traffic
+    -   Stand Still Traffic
+    -   Light Traffic
+-   Road Closed
+    -   Event
+    -   Construction
+    -   Hazard
+
+
+### Then we do it in code:
+
+```{python}
+### define a new df 'crosswalk'
+crosswalk = pd.DataFrame(
+  columns=['type', 
+           'subtype', 
+           'updated_type', 
+           'updated_subtype', 
+           'updated_subsubtype'])
+# first two columns from the original dataset
+crosswalk[['type', 'subtype']] = waze[['type', 'subtype']]
+
+### create a temporary cloumn 'combined_type'
+crosswalk['subtype'] = crosswalk['subtype'].fillna('Unclassified')
+crosswalk['combined_type'] = crosswalk["type"] + '_' + crosswalk['subtype']
+crosswalk = crosswalk.drop_duplicates(subset=['combined_type']).reset_index(drop=True)
+
+### deal with duplicated types in some rows
+# some rows have duplicated type such as 'ACCIDENT_ACCIDENT'
+# create a replacement dictionary
+replacement_dict ={
+  'HAZARD_HAZARD'           : 'HAZARD',
+  'JAM_JAM'                 : 'JAM',
+  'ROAD_CLOSED_ROAD_CLOSED' : 'ROAD_CLOSED',
+  'ACCIDENT_ACCIDENT'       :'ACCIDENT'
+}
+
+# create a function to apply replacement
+def adjustment_function(subtype, adjustment_dict):
+    for key, value in adjustment_dict.items():
+        if key in subtype:  
+            subtype = subtype.replace(key, value)  
+    return subtype
+
+crosswalk['combined_type'] = crosswalk['combined_type'].apply(
+  lambda x: adjustment_function(x, replacement_dict)
+  )
+
+### deal with type/subtype name with multiple words.
+# create an adjustment dictionary
+adjustment_dict = {
+  'ON_ROAD'             : 'ON ROAD',
+  'ON_SHOULDER'         : 'ON SHOULDER',
+  'CAR_STOPPED'         : 'CAR STOPPED',
+  'EMERGENCY_VEHICLE'   : 'EMERGENCY VEHICLE',
+  'POT_HOLE'            : 'POT HOLE',
+  'TRAFFIC_LIGHT_FAULT' : 'TRAFFIC LIGHT FAULT',
+  'LANE_CLOSED'         : 'LANE CLOSED',
+  'ROAD_KILL'           : 'ROAD KILL',
+  'CAR_STOPPED'         : 'CAR STOPPED',
+  'MISSING_SIGN'        : 'MISSING SIGN',
+  'HEAVY_SNOW'          : 'HEAVY SNOW',
+  'HEAVY_TRAFFIC'       : 'HEAVY TRAFFIC',
+  'MODERATE_TRAFFIC'    : 'MODERATE TRAFFIC',
+  'STAND_STILL_TRAFFIC' : 'STAND STILL TRAFFIC',
+  'LIGHT_TRAFFIC'       : 'LIGHT TRAFFIC',
+  'ROAD_CLOSED'         : 'ROAD CLOSED'
+}
+
+# use the above adjustment_function
+crosswalk['combined_type'] = crosswalk['combined_type'].apply(
+  lambda x: adjustment_function(x, adjustment_dict)
+  )
+
+### such that we can easily seperate type family by the underscore.
+# define a function to fill in the three columns
+def split_combined_type(combined_type):
+    parts = combined_type.split('_')  # split based on the underscore
+    updated_type = parts[0]  
+    updated_subtype = parts[1] 
+    updated_subsubtype = parts[2] if len(parts) > 2 else 'Unclassified' 
+    return updated_type, updated_subtype, updated_subsubtype
+
+crosswalk[
+  ['updated_type','updated_subtype','updated_subsubtype']
+  ] = crosswalk['combined_type'].apply(
+    lambda x: pd.Series(split_combined_type(x))
+    )
+
+# Drop the temporary column, "title" the content
+crosswalk = crosswalk.drop(columns=['combined_type'])
+crosswalk[
+  ['updated_type', 'updated_subtype', 'updated_subsubtype']
+  ] = crosswalk[
+    ['updated_type', 'updated_subtype', 'updated_subsubtype']
+    ].applymap(lambda x: x.title())
+
+### merge the corsswalk df back to waze DataFrame
+waze['subtype'] = waze['subtype'].fillna('Unclassified')
+waze = waze.merge(crosswalk,
+                  on = ['type','subtype'],
+                  how = 'left'
+)
+
+```
+
+
+# Data Visualization
+
+Now that we have a cleaned DataFrame, we want to create a Shiny App to visualize the top 10 locations with the highest number of a certain alerts in a specific time or time period.
+
+### Download the geodata
+
+Download the neighborhood boundaries as a GeoJSON from the [Chicago Data Portal](https://data.cityofchicago.org/api/geospatial/bbvz-uum9?method=export&format=GeoJSON)
+
+```{python}
+file_path = "Boundaries - Neighborhoods.geojson"
+
+with open(file_path) as f:
+    chicago_geojson = json.load(f)
+
+geo_data = alt.Data(values=chicago_geojson["features"])   
+```
+
+### Prepare the DataFrame for the Shiny App
+
+```{python}
+### use regex to capture longitude and latitude from column geo
+waze[['longitude', 'latitude']] = waze['geo'].str.extract(
+  r'POINT\((-?\d+\.\d+)\s(-?\d+\.\d+)\)'
+  )
+
+### round to two decimal places
+waze['latitude_bin'] = waze['latitude'].astype(float).round(2)
+waze['longitude_bin'] = waze['longitude'].astype(float).round(2)
+
+### Extract hour data from the column ts
+waze['ts'] = pd.to_datetime(waze['ts'])
+waze['hour'] = waze['ts'].dt.strftime('%H:00')
+
+### Select columns that will be used
+top_alerts_map_byhour = waze[
+    ['latitude_bin','longitude_bin','updated_type','updated_subtype','hour']
+    ]
+
+# aggregate to the level needed
+top_alerts_map_byhour = top_alerts_map_byhour.groupby(
+    ['latitude_bin', 'longitude_bin','updated_type','updated_subtype','hour']
+    ).size().reset_index(name = 'count')
+
+# save in the appointed folder
+top_alerts_map_byhour.to_csv('top_alerts_map_byhour/top_alerts_map_byhour.csv',
+                            index=False)
+
+```
+
+
+### Code for Shiny App
+
+The code for the Shiny App is in /top_alerts_map_byhour/app.py
+
+Here I use a function to print the code here for consistency.
+
+```{python}
+def print_file_contents(file_path):
+    """Print contents of a file."""
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+            print("```python")
+            print(content)
+            print("```")
+    except FileNotFoundError:
+        print("```python")
+        print(f"Error: File '{file_path}' not found")
+        print("```")
+    except Exception as e:
+        print("```python") 
+        print(f"Error reading file: {e}")
+        print("```")
+
+print_file_contents("top_alerts_map_byhour/app.py") 
+```
+
+
+
+### Outcome screenshots
+
+Below is an example of the Shiny outcome.
+
+#### sample 1
+
+![](outcome_screenshot/sample1.png)
+
+#### sample 2
+![](outcome_screenshot/sample2.png)
