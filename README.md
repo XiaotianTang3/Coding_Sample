@@ -22,7 +22,10 @@ A Shiny dashboard is created to visualize the cleaned data, featuring the follow
 (3) A Slider: To select a specific hour or time range.   
 
 The Shiny dashboard will generate the Top Alert Locations:   
-Displays the top 10 alert locations in Chicago for the selected type, subtype, and hour/time range.   
+Displays the top 10 alert locations in Chicago for the selected type, subtype, and hour/time range.
+
+## Notice
+*To make this app work, make sure you are in the working directory, then type $shiny run --reaload top_alerts_map_byhour/app.py in the terminal. Cope paste the IP address to your own browser if the app doesn't automatically load.*
 
 
 
