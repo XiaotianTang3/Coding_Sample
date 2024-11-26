@@ -25,7 +25,7 @@ The Shiny dashboard will generate the Top Alert Locations:
 Displays the top 10 alert locations in Chicago for the selected type, subtype, and hour/time range.
 
 ## Notice
-*To make this app work, make sure you are in the working directory, then type $shiny run --reload top_alerts_map_byhour/app.py in the terminal. Cope paste the IP address to your own browser if the app doesn't automatically load.*
+*To make this app work, make sure you are in the working directory, then type $shiny run --reload top_alerts_map_byhour/app.py in the terminal. Copy paste the IP address to your own browser if the app doesn't automatically load.*
 
 
 
